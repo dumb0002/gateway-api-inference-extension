@@ -136,7 +136,11 @@ func (d *Director) HandleRequest(ctx context.Context, reqCtx *handlers.RequestCo
 	// Get candidate pods for scheduling
 	candidatePods := d.getCandidatePodsForScheduling(ctx, reqCtx.Request.Metadata)
 	if len(candidatePods) == 0 {
-		return reqCtx, errutil.Error{Code: errutil.ServiceUnavailable, Msg: "failed to find candidate pods for serving the request"}
+		if found := CreateVllmEngine(ctx); !found {
+			return reqCtx, errutil.Error{Code: errutil.ServiceUnavailable, Msg: "failed to find candidate pods for serving the request"}
+		} else {
+			candidatePods = d.getCandidatePodsForScheduling(ctx, reqCtx.Request.Metadata)
+		}
 	}
 
 	// Admission Control check
@@ -179,6 +183,7 @@ func (d *Director) getCandidatePodsForScheduling(ctx context.Context, requestMet
 	if !found {
 		return d.datastore.PodList(backendmetrics.AllPodsPredicate)
 	} else if len(endpointSubsetList) == 0 {
+
 		loggerTrace.Info("found empty subset filter in request metadata, filtering all pods")
 		return []backendmetrics.PodMetrics{}
 	}
