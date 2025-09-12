@@ -57,11 +57,9 @@ func CreateVllmEngine(ctx context.Context) bool {
 	} else {
 
 		if deployOld != nil {
-			zeroReplicas := int32(0)
-			oneReplicas := int32(1)
-
 			// if vLLM deployment exists but has 0 replicas then set the number of replicas to 1
-			if deployOld.Spec.Replicas == &zeroReplicas {
+			if *deployOld.Spec.Replicas == 0 {
+				oneReplicas := int32(1)
 				deployOld.Spec.Replicas = &oneReplicas
 
 				_, err = dc.Update(context.TODO(), deployOld, metav1.UpdateOptions{})
