@@ -29,6 +29,7 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
+	"k8s.io/apimachinery/pkg/labels"
 	v1 "sigs.k8s.io/gateway-api-inference-extension/api/v1"
 	"sigs.k8s.io/gateway-api-inference-extension/apix/v1alpha2"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend"
@@ -134,10 +135,28 @@ func (d *Director) HandleRequest(ctx context.Context, reqCtx *handlers.RequestCo
 	ctx = log.IntoContext(ctx, logger)
 	logger.V(logutil.DEBUG).Info("LLM request assembled")
 
+	// Get InferencePool Info
+	pool, err := d.datastore.PoolGet()
+	if err != nil {
+		return reqCtx, err
+	}
+
+	poolName := pool.Name
+	namespace := pool.Namespace
+
 	// Get candidate pods for scheduling
 	candidatePods := d.getCandidatePodsForScheduling(ctx, reqCtx.Request.Metadata)
 	if len(candidatePods) == 0 {
-		return reqCtx, errutil.Error{Code: errutil.ServiceUnavailable, Msg: "failed to find candidate pods for serving the request"}
+		metrics.RecordInferencePoolEnableAutoscaling(poolName, reqCtx.TargetModelName, float64(1.0))
+
+		// Check if target inferencePool have running Pods
+		candidatePodLabel := selectorFromInferencePoolSelector(pool.Spec.Selector.MatchLabels)
+		if ready := InferencePoolReady(ctx, namespace, candidatePodLabel.String()); !ready {
+			return reqCtx, errutil.Error{Code: errutil.ServiceUnavailable, Msg: "failed to find candidate pods for serving the request"}
+		} else {
+			candidatePods = d.getCandidatePodsForScheduling(ctx, reqCtx.Request.Metadata)
+			metrics.RecordInferencePoolEnableAutoscaling(poolName, reqCtx.TargetModelName, float64(0.0))
+		}
 	}
 
 	// Admission Control check
@@ -322,4 +341,16 @@ func (d *Director) runPostResponsePlugins(ctx context.Context, request *scheduli
 		metrics.RecordPluginProcessingLatency(PostResponseExtensionPoint, plugin.TypedName().Type, plugin.TypedName().Name, time.Since(before))
 		loggerDebug.Info("Completed running post-response plugin successfully", "plugin", plugin.TypedName())
 	}
+}
+
+func selectorFromInferencePoolSelector(selector map[v1.LabelKey]v1.LabelValue) labels.Selector {
+	return labels.SelectorFromSet(stripLabelKeyAliasFromLabelMap(selector))
+}
+
+func stripLabelKeyAliasFromLabelMap(labels map[v1.LabelKey]v1.LabelValue) map[string]string {
+	outMap := make(map[string]string)
+	for k, v := range labels {
+		outMap[string(k)] = string(v)
+	}
+	return outMap
 }

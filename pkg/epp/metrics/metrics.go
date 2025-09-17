@@ -142,6 +142,15 @@ var (
 	)
 
 	// Inference Pool Metrics
+	inferencePoolEnableAutoscaling = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Subsystem: InferencePoolComponent,
+			Name:      "auto_scaling_enabled",
+			Help:      metricsutil.HelpMsgWithStability("Enable autoscaling of pods in a inferencePool. 1 means enable pod autoscaling; 0 means disable pod autoscaling", compbasemetrics.ALPHA),
+		},
+		[]string{"name", "target_model_name"},
+	)
+
 	inferencePoolAvgKVCache = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Subsystem: InferencePoolComponent,
@@ -251,6 +260,7 @@ func Register(customCollectors ...prometheus.Collector) {
 		metrics.Registry.MustRegister(outputTokens)
 		metrics.Registry.MustRegister(runningRequests)
 		metrics.Registry.MustRegister(NormalizedTimePerOutputToken)
+		metrics.Registry.MustRegister(inferencePoolEnableAutoscaling)
 		metrics.Registry.MustRegister(inferencePoolAvgKVCache)
 		metrics.Registry.MustRegister(inferencePoolAvgQueueSize)
 		metrics.Registry.MustRegister(inferencePoolReadyPods)
@@ -277,6 +287,7 @@ func Reset() {
 	outputTokens.Reset()
 	runningRequests.Reset()
 	NormalizedTimePerOutputToken.Reset()
+	inferencePoolEnableAutoscaling.Reset()
 	inferencePoolAvgKVCache.Reset()
 	inferencePoolAvgQueueSize.Reset()
 	inferencePoolReadyPods.Reset()
@@ -369,6 +380,10 @@ func DecRunningRequests(modelName string) {
 	if modelName != "" {
 		runningRequests.WithLabelValues(modelName).Dec()
 	}
+}
+
+func RecordInferencePoolEnableAutoscaling(poolName, modelName string, ready float64) {
+	inferencePoolEnableAutoscaling.WithLabelValues(poolName, modelName).Set(ready)
 }
 
 func RecordInferencePoolAvgKVCache(name string, utilization float64) {
