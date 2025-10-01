@@ -32,9 +32,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	v1 "sigs.k8s.io/gateway-api-inference-extension/api/v1"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/metrics"
-	schedulingtypes "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
+	//"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend"
 	errutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/error"
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/logging"
 	requtil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/request"
@@ -55,7 +53,6 @@ func NewStreamingServer(datastore Datastore, director Director) *StreamingServer
 type Director interface {
 	HandleRequest(ctx context.Context, reqCtx *RequestContext) (*RequestContext, error)
 	HandleResponse(ctx context.Context, reqCtx *RequestContext) (*RequestContext, error)
-	GetRandomPod() *backend.Pod
 }
 
 type Datastore interface {
@@ -74,7 +71,7 @@ type StreamingServer struct {
 // Specifically, there are fields related to the ext-proc protocol, and then fields related to the lifecycle of the request.
 // We should split these apart as this monolithic object exposes too much data to too many layers.
 type RequestContext struct {
-	TargetPod                 *backend.Pod
+	// TargetPod                 *backend.Pod
 	TargetEndpoint            string
 	IncomingModelName         string
 	TargetModelName           string
@@ -89,8 +86,6 @@ type RequestContext struct {
 	ResponseStatusCode        string
 	RequestRunning            bool
 	Request                   *Request
-
-	SchedulingRequest *schedulingtypes.LLMRequest
 
 	RequestState         StreamRequestState
 	modelServerStreaming bool
@@ -148,22 +143,22 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 	}
 
 	var body []byte
+	var err error
 	var responseBody map[string]any
 
 	// Create error handling var as each request should only report once for
 	// error metrics. This doesn't cover the error "Cannot receive stream request" because
 	// such errors might happen even though response is processed.
-	var err error
-	defer func(error, *RequestContext) {
-		if reqCtx.ResponseStatusCode != "" {
-			metrics.RecordRequestErrCounter(reqCtx.IncomingModelName, reqCtx.TargetModelName, reqCtx.ResponseStatusCode)
-		} else if err != nil {
-			metrics.RecordRequestErrCounter(reqCtx.IncomingModelName, reqCtx.TargetModelName, errutil.CanonicalCode(err))
-		}
-		if reqCtx.RequestRunning {
-			metrics.DecRunningRequests(reqCtx.IncomingModelName)
-		}
-	}(err, reqCtx)
+	// defer func(error, *RequestContext) {
+	// 	if reqCtx.ResponseStatusCode != "" {
+	// 		metrics.RecordRequestErrCounter(reqCtx.IncomingModelName, reqCtx.TargetModelName, reqCtx.ResponseStatusCode)
+	// 	} else if err != nil {
+	// 		metrics.RecordRequestErrCounter(reqCtx.IncomingModelName, reqCtx.TargetModelName, errutil.CanonicalCode(err))
+	// 	}
+	// 	if reqCtx.RequestRunning {
+	// 		metrics.DecRunningRequests(reqCtx.IncomingModelName)
+	// 	}
+	// }(err, reqCtx)
 
 	for {
 		select {
@@ -234,8 +229,6 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 				reqCtx.reqHeaderResp = s.generateRequestHeaderResponse(reqCtx)
 				reqCtx.reqBodyResp = s.generateRequestBodyResponses(requestBodyBytes)
 
-				metrics.RecordRequestCounter(reqCtx.IncomingModelName, reqCtx.TargetModelName)
-				metrics.RecordRequestSizes(reqCtx.IncomingModelName, reqCtx.TargetModelName, reqCtx.RequestSize)
 			}
 		case *extProcPb.ProcessingRequest_RequestTrailers:
 			// This is currently unused.
@@ -274,8 +267,6 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 					loggerTrace.Info("stream completed")
 
 					reqCtx.ResponseCompleteTimestamp = time.Now()
-					metrics.RecordRequestLatencies(ctx, reqCtx.IncomingModelName, reqCtx.TargetModelName, reqCtx.RequestReceivedTimestamp, reqCtx.ResponseCompleteTimestamp)
-					metrics.RecordResponseSizes(reqCtx.IncomingModelName, reqCtx.TargetModelName, reqCtx.ResponseSize)
 				}
 
 				reqCtx.respBodyResp = generateResponseBodyResponses(v.ResponseBody.Body, v.ResponseBody.EndOfStream)
@@ -309,10 +300,6 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 						}
 					} else if reqCtx.ResponseComplete {
 						reqCtx.ResponseCompleteTimestamp = time.Now()
-						metrics.RecordRequestLatencies(ctx, reqCtx.IncomingModelName, reqCtx.TargetModelName, reqCtx.RequestReceivedTimestamp, reqCtx.ResponseCompleteTimestamp)
-						metrics.RecordResponseSizes(reqCtx.IncomingModelName, reqCtx.TargetModelName, reqCtx.ResponseSize)
-						metrics.RecordInputTokens(reqCtx.IncomingModelName, reqCtx.TargetModelName, reqCtx.Usage.PromptTokens)
-						metrics.RecordOutputTokens(reqCtx.IncomingModelName, reqCtx.TargetModelName, reqCtx.Usage.CompletionTokens)
 					}
 				}
 			}
@@ -366,7 +353,6 @@ func (r *RequestContext) updateStateAndSendIfNeeded(srv extProcPb.ExternalProces
 			}
 		}
 		r.RequestState = BodyRequestResponsesComplete
-		metrics.IncRunningRequests(r.IncomingModelName)
 		r.RequestRunning = true
 		// Dump the response so a new stream message can begin
 		r.reqBodyResp = nil

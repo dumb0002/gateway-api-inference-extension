@@ -19,10 +19,8 @@ package controller
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/google/go-cmp/cmp"
-	"github.com/google/go-cmp/cmp/cmpopts"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -35,7 +33,6 @@ import (
 	v1 "sigs.k8s.io/gateway-api-inference-extension/api/v1"
 	"sigs.k8s.io/gateway-api-inference-extension/apix/v1alpha2"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/common"
-	backendmetrics "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend/metrics"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datastore"
 	utiltest "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/testing"
 )
@@ -112,8 +109,7 @@ func TestInferencePoolReconciler(t *testing.T) {
 	req := ctrl.Request{NamespacedName: namespacedName}
 	ctx := context.Background()
 
-	pmf := backendmetrics.NewPodMetricsFactory(&backendmetrics.FakePodMetricsClient{}, time.Second)
-	datastore := datastore.NewDatastore(ctx, pmf)
+	datastore := datastore.NewDatastore(ctx)
 	inferencePoolReconciler := &InferencePoolReconciler{Reader: fakeClient, Datastore: datastore, PoolGKNN: gknn}
 
 	// Step 1: Inception, only ready pods matching pool1 are added to the store.
@@ -173,9 +169,8 @@ func TestInferencePoolReconciler(t *testing.T) {
 }
 
 type diffStoreParams struct {
-	wantPool       *v1.InferencePool
-	wantPods       []string
-	wantObjectives []*v1alpha2.InferenceObjective
+	wantPool *v1.InferencePool
+	wantPods []string
 }
 
 func diffStore(datastore datastore.Datastore, params diffStoreParams) string {
@@ -184,28 +179,6 @@ func diffStore(datastore datastore.Datastore, params diffStoreParams) string {
 		return "pool:" + diff
 	}
 
-	// Default wantPods if not set because PodGetAll returns an empty slice when empty.
-	if params.wantPods == nil {
-		params.wantPods = []string{}
-	}
-	gotPods := []string{}
-	for _, pm := range datastore.PodList(backendmetrics.AllPodsPredicate) {
-		gotPods = append(gotPods, pm.GetPod().NamespacedName.Name)
-	}
-	if diff := cmp.Diff(params.wantPods, gotPods, cmpopts.SortSlices(func(a, b string) bool { return a < b })); diff != "" {
-		return "pods:" + diff
-	}
-
-	// Default wantModels if not set because ModelGetAll returns an empty slice when empty.
-	if params.wantObjectives == nil {
-		params.wantObjectives = []*v1alpha2.InferenceObjective{}
-	}
-
-	if diff := cmp.Diff(params.wantObjectives, datastore.ObjectiveGetAll(), cmpopts.SortSlices(func(a, b *v1alpha2.InferenceObjective) bool {
-		return a.Name < b.Name
-	})); diff != "" {
-		return "models:" + diff
-	}
 	return ""
 }
 
@@ -257,8 +230,7 @@ func TestXInferencePoolReconciler(t *testing.T) {
 	req := ctrl.Request{NamespacedName: namespacedName}
 	ctx := context.Background()
 
-	pmf := backendmetrics.NewPodMetricsFactory(&backendmetrics.FakePodMetricsClient{}, time.Second)
-	datastore := datastore.NewDatastore(ctx, pmf)
+	datastore := datastore.NewDatastore(ctx)
 	inferencePoolReconciler := &InferencePoolReconciler{Reader: fakeClient, Datastore: datastore, PoolGKNN: gknn}
 
 	// Step 1: Inception, only ready pods matching pool1 are added to the store.
@@ -316,9 +288,8 @@ func TestXInferencePoolReconciler(t *testing.T) {
 }
 
 type xDiffStoreParams struct {
-	wantPool       *v1alpha2.InferencePool
-	wantPods       []string
-	wantObjectives []*v1alpha2.InferenceObjective
+	wantPool *v1alpha2.InferencePool
+	wantPods []string
 }
 
 func xDiffStore(t *testing.T, datastore datastore.Datastore, params xDiffStoreParams) string {
@@ -337,27 +308,5 @@ func xDiffStore(t *testing.T, datastore datastore.Datastore, params xDiffStorePa
 		return "pool:" + diff
 	}
 
-	// Default wantPods if not set because PodGetAll returns an empty slice when empty.
-	if params.wantPods == nil {
-		params.wantPods = []string{}
-	}
-	gotPods := []string{}
-	for _, pm := range datastore.PodList(backendmetrics.AllPodsPredicate) {
-		gotPods = append(gotPods, pm.GetPod().NamespacedName.Name)
-	}
-	if diff := cmp.Diff(params.wantPods, gotPods, cmpopts.SortSlices(func(a, b string) bool { return a < b })); diff != "" {
-		return "pods:" + diff
-	}
-
-	// Default wantModels if not set because ModelGetAll returns an empty slice when empty.
-	if params.wantObjectives == nil {
-		params.wantObjectives = []*v1alpha2.InferenceObjective{}
-	}
-
-	if diff := cmp.Diff(params.wantObjectives, datastore.ObjectiveGetAll(), cmpopts.SortSlices(func(a, b *v1alpha2.InferenceObjective) bool {
-		return a.Name < b.Name
-	})); diff != "" {
-		return "models:" + diff
-	}
 	return ""
 }

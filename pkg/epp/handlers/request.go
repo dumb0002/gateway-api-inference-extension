@@ -26,7 +26,6 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/metadata"
-	errutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/error"
 )
 
 func (s *StreamingServer) HandleRequestHeaders(reqCtx *RequestContext, req *extProcPb.ProcessingRequest_RequestHeaders) error {
@@ -38,10 +37,7 @@ func (s *StreamingServer) HandleRequestHeaders(reqCtx *RequestContext, req *extP
 		// More context: https://github.com/kubernetes-sigs/gateway-api-inference-extension/pull/526
 		// The above PR will address endpoint admission, but currently any request without a body will be
 		// routed to a random upstream pod.
-		pod := s.director.GetRandomPod()
-		if pod == nil {
-			return errutil.Error{Code: errutil.Internal, Msg: "no pods available in datastore"}
-		}
+
 		pool, err := s.datastore.PoolGet()
 		if err != nil {
 			return err
@@ -49,7 +45,6 @@ func (s *StreamingServer) HandleRequestHeaders(reqCtx *RequestContext, req *extP
 		if len(pool.Spec.TargetPorts) != 1 {
 			return fmt.Errorf("expected 1 target port, got %d", len(pool.Spec.TargetPorts))
 		}
-		reqCtx.TargetEndpoint = pod.Address + ":" + strconv.Itoa(int(pool.Spec.TargetPorts[0].Number))
 		reqCtx.RequestSize = 0
 		reqCtx.reqHeaderResp = s.generateRequestHeaderResponse(reqCtx)
 		return nil

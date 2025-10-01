@@ -36,9 +36,7 @@ import (
 	"sigs.k8s.io/gateway-api-inference-extension/internal/runnable"
 	tlsutil "sigs.k8s.io/gateway-api-inference-extension/internal/tls"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/common"
-	backendmetrics "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend/metrics"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/controller"
-	dlmetrics "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datalayer/metrics"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datastore"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/handlers"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/requestcontrol"
@@ -56,12 +54,6 @@ type ExtProcServerRunner struct {
 	RefreshPrometheusMetricsInterval time.Duration
 	MetricsStalenessThreshold        time.Duration
 	Director                         *requestcontrol.Director
-	SaturationDetector               requestcontrol.SaturationDetector
-	UseExperimentalDatalayerV2       bool // Pluggable data layer feature flag
-
-	// This should only be used in tests. We won't need this once we do not inject metrics in the tests.
-	// TODO:(https://github.com/kubernetes-sigs/gateway-api-inference-extension/issues/432) Cleanup
-	TestPodMetricsClient *backendmetrics.FakePodMetricsClient
 }
 
 // Default values for CLI flags in main
@@ -76,12 +68,7 @@ const (
 	DefaultSecureServing                    = true                          // default for --secure-serving
 	DefaultHealthChecking                   = false                         // default for --health-checking
 	DefaultEnablePprof                      = true                          // default for --enable-pprof
-	DefaultTotalQueuedRequestsMetric        = "vllm:num_requests_waiting"   // default for --total-queued-requests-metric
-	DefaultKvCacheUsagePercentageMetric     = "vllm:gpu_cache_usage_perc"   // default for --kv-cache-usage-percentage-metric
-	DefaultLoraInfoMetric                   = "vllm:lora_requests_info"     // default for --lora-info-metric
 	DefaultCertPath                         = ""                            // default for --cert-path
-	DefaultConfigFile                       = ""                            // default for --config-file
-	DefaultConfigText                       = ""                            // default for --config-text
 	DefaultPoolGroup                        = "inference.networking.k8s.io" // default for --pool-group
 	DefaultMetricsStalenessThreshold        = 2 * time.Second
 )
@@ -119,20 +106,6 @@ func (r *ExtProcServerRunner) SetupWithManager(ctx context.Context, mgr ctrl.Man
 		return fmt.Errorf("failed setting up InferencePoolReconciler: %w", err)
 	}
 
-	if err := (&controller.InferenceObjectiveReconciler{
-		Datastore: r.Datastore,
-		Reader:    mgr.GetClient(),
-		PoolGKNN:  r.PoolGKNN,
-	}).SetupWithManager(ctx, mgr); err != nil {
-		return fmt.Errorf("failed setting up InferenceObjectiveReconciler: %w", err)
-	}
-
-	if err := (&controller.PodReconciler{
-		Datastore: r.Datastore,
-		Reader:    mgr.GetClient(),
-	}).SetupWithManager(mgr); err != nil {
-		return fmt.Errorf("failed setting up PodReconciler: %v", err)
-	}
 	return nil
 }
 
@@ -140,11 +113,6 @@ func (r *ExtProcServerRunner) SetupWithManager(ctx context.Context, mgr ctrl.Man
 // The runnable implements LeaderElectionRunnable with leader election disabled.
 func (r *ExtProcServerRunner) AsRunnable(logger logr.Logger) manager.Runnable {
 	return runnable.NoLeaderElection(manager.RunnableFunc(func(ctx context.Context) error {
-		if r.UseExperimentalDatalayerV2 {
-			dlmetrics.StartMetricsLogger(ctx, r.Datastore, r.RefreshPrometheusMetricsInterval, r.MetricsStalenessThreshold)
-		} else {
-			backendmetrics.StartMetricsLogger(ctx, r.Datastore, r.RefreshPrometheusMetricsInterval, r.MetricsStalenessThreshold)
-		}
 
 		var srv *grpc.Server
 		if r.SecureServing {

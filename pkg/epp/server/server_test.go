@@ -26,7 +26,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"sigs.k8s.io/gateway-api-inference-extension/apix/v1alpha2"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/handlers"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/metadata"
 	testutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/testing"
@@ -52,7 +51,7 @@ func TestServer(t *testing.T) {
 			CreationTimestamp(metav1.Unix(1000, 0)).ObjRef()
 
 		director := &testDirector{}
-		ctx, cancel, ds, _ := utils.PrepareForTestStreamingServer([]*v1alpha2.InferenceObjective{model},
+		ctx, cancel, ds := utils.PrepareForTestStreamingServer([]*v1alpha2.InferenceObjective{model},
 			[]*v1.Pod{{ObjectMeta: metav1.ObjectMeta{Name: podName}}}, "test-pool1", namespace, poolPort)
 
 		streamingServer := handlers.NewStreamingServer(ds, director)
@@ -183,8 +182,4 @@ func (ts *testDirector) HandleRequest(ctx context.Context, reqCtx *handlers.Requ
 
 func (ts *testDirector) HandleResponse(ctx context.Context, reqCtx *handlers.RequestContext) (*handlers.RequestContext, error) {
 	return reqCtx, nil
-}
-
-func (ts *testDirector) GetRandomPod() *backend.Pod {
-	return nil
 }

@@ -28,14 +28,9 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/test/bufconn"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/runtime"
-	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	v1 "sigs.k8s.io/gateway-api-inference-extension/api/v1"
 	"sigs.k8s.io/gateway-api-inference-extension/apix/v1alpha2"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend/metrics"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datastore"
 	testutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/testing"
 )
@@ -45,36 +40,16 @@ const bufSize = 1024 * 1024
 var testListener *bufconn.Listener
 
 func PrepareForTestStreamingServer(objectives []*v1alpha2.InferenceObjective, pods []*corev1.Pod, poolName string, namespace string,
-	poolPort int32) (context.Context, context.CancelFunc, datastore.Datastore, *metrics.FakePodMetricsClient) {
+	poolPort int32) (context.Context, context.CancelFunc, datastore.Datastore) {
 	ctx, cancel := context.WithCancel(context.Background())
 
-	pmc := &metrics.FakePodMetricsClient{}
-	pmf := metrics.NewPodMetricsFactory(pmc, time.Second)
-	ds := datastore.NewDatastore(ctx, pmf)
+	ds := datastore.NewDatastore(ctx)
 
-	initObjs := []client.Object{}
-	for _, objective := range objectives {
-		initObjs = append(initObjs, objective)
-		ds.ObjectiveSet(objective)
-	}
-	for _, pod := range pods {
-		initObjs = append(initObjs, pod)
-		ds.PodUpdateOrAddIfNotExist(pod)
-	}
-
-	scheme := runtime.NewScheme()
-	_ = clientgoscheme.AddToScheme(scheme)
-	_ = v1alpha2.Install(scheme)
-	_ = v1.Install(scheme)
-	fakeClient := fake.NewClientBuilder().
-		WithScheme(scheme).
-		WithObjects(initObjs...).
-		Build()
 	pool := testutil.MakeInferencePool(poolName).Namespace(namespace).ObjRef()
 	pool.Spec.TargetPorts = []v1.Port{{Number: v1.PortNumber(poolPort)}}
-	_ = ds.PoolSet(context.Background(), fakeClient, pool)
+	_ = ds.PoolSet(context.Background(), pool)
 
-	return ctx, cancel, ds, pmc
+	return ctx, cancel, ds
 }
 
 func SetupTestStreamingServer(t *testing.T, ctx context.Context, ds datastore.Datastore,
