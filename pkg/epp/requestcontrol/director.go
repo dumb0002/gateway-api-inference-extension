@@ -21,6 +21,7 @@ package requestcontrol
 import (
 	"context"
 
+	"k8s.io/apimachinery/pkg/labels"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	v1 "sigs.k8s.io/gateway-api-inference-extension/api/v1"
@@ -84,11 +85,12 @@ func (d *Director) HandleRequest(ctx context.Context, reqCtx *handlers.RequestCo
 
 	logger.V(logutil.VERBOSE).Info("InferencePool found", "name", poolName, "namespace", namespace)
 
-	// // Get candidate pods for scheduling
-	// candidatePods := d.getCandidatePodsForScheduling(ctx, reqCtx.Request.Metadata)
-	// if len(candidatePods) == 0 {
-	// 	return reqCtx, errutil.Error{Code: errutil.ServiceUnavailable, Msg: "failed to find candidate pods for serving the request"}
-	// }
+	// Check if target inferencePool have running candidate Pods
+	candidatePodLabel := selectorFromInferencePoolSelector(pool.Spec.Selector.MatchLabels)
+
+	if ready := InferencePoolReady(ctx, namespace, candidatePodLabel.String()); !ready {
+		return reqCtx, errutil.Error{Code: errutil.ServiceUnavailable, Msg: "failed to find active candidate pods in the inferencePool for serving the request"}
+	}
 
 	return reqCtx, nil
 }
@@ -104,4 +106,16 @@ func (d *Director) HandleResponse(ctx context.Context, reqCtx *handlers.RequestC
 	// d.runPostResponsePlugins(ctx, reqCtx.SchedulingRequest, response, reqCtx.TargetPod)
 
 	return reqCtx, nil
+}
+
+func selectorFromInferencePoolSelector(selector map[v1.LabelKey]v1.LabelValue) labels.Selector {
+	return labels.SelectorFromSet(stripLabelKeyAliasFromLabelMap(selector))
+}
+
+func stripLabelKeyAliasFromLabelMap(labels map[v1.LabelKey]v1.LabelValue) map[string]string {
+	outMap := make(map[string]string)
+	for k, v := range labels {
+		outMap[string(k)] = string(v)
+	}
+	return outMap
 }
